@@ -16,7 +16,7 @@ class HandleCors
 
     /** @var \Illuminate\Contracts\Container\Container $container */
     protected $container;
-    
+
     public function __construct(CorsService $cors, Container $container)
     {
         $this->cors = $cors;
@@ -32,6 +32,11 @@ class HandleCors
      */
     public function handle($request, Closure $next)
     {
+        // Check if there are any requests that we should explicitly exclude
+        if($this->shouldNotRun($request)) {
+            return $next($request);
+        }
+
         // Check if we're dealing with CORS and if we should handle it
         if (! $this->shouldRun($request)) {
             return $next($request);
@@ -78,7 +83,23 @@ class HandleCors
     }
 
     /**
-     * The the path from the config, to see if the CORS Service should run
+     * Determine if the request has a URI that should not pass through the CORS flow.
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return bool
+     */
+    protected function shouldNotRun(Request $request): bool
+    {
+        // Check if this is an actual CORS request
+        if (! $this->cors->isCorsRequest($request)) {
+            return true;
+        }
+
+        return $this->isMatchingExcludedPaths($request);
+    }
+
+    /**
+     * The path from the config, to see if the CORS Service should run
      *
      * @param  \Illuminate\Http\Request  $request
      * @return bool
@@ -88,16 +109,40 @@ class HandleCors
         // Get the paths from the config or the middleware
         $paths = $this->container['config']->get('cors.paths', []);
 
+        return $this->isMatching($request, $paths);
+    }
+
+    /**
+     * The excluded_paths from the config, to see if the CORS Service should not run
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return bool
+     */
+    protected function isMatchingExcludedPaths(Request $request): bool
+    {
+        // Get the excluded_paths from the config or the middleware
+        $paths = $this->container['config']->get('cors.excluded_paths', []);
+
+        return $this->isMatching($request, $paths);
+    }
+
+    /**
+     * Semi-generic matching function that determines if a request matches any paths in an array
+     *
+     * @param Request $request
+     * @param Array $paths
+     * @return bool
+     */
+    protected function isMatching(Request $request, Array $paths): bool
+    {
         foreach ($paths as $path) {
             if ($path !== '/') {
                 $path = trim($path, '/');
             }
-
             if ($request->fullUrlIs($path) || $request->is($path)) {
                 return true;
             }
         }
-
         return false;
     }
 
